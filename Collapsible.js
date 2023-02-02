@@ -1,5 +1,7 @@
 import React, { Component } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import Animated from 'react-native-reanimated';
+
+const Easing = Animated.EasingNode || Animated.Easing;
 
 const ANIMATED_EASING_PREFIXES = ['easeInOut', 'easeOut', 'easeIn'];
 
@@ -10,7 +12,7 @@ export default class Collapsible extends Component {
     collapsedHeight: 0,
     enablePointerEvents: false,
     duration: 200,
-    easing: Easing.out(Easing.cubic),
+    easing: 'easeOutCubic',
     onAnimationEnd: () => null,
     renderChildrenCollapsed: true,
   };
@@ -108,84 +110,132 @@ export default class Collapsible extends Component {
       });
     }
   }
+
   _transitionToHeight(height) {
     const { duration } = this.props;
-    const easing = this._getEasingType(this.props.easing);
+    let easing = this.props.easing;
+    if (typeof easing === 'string') {
+      let prefix;
+      let found = false;
+      for (let i = 0; i < ANIMATED_EASING_PREFIXES.length; i++) {
+        prefix = ANIMATED_EASING_PREFIXES[i];
+        if (easing.substr(0, prefix.length) === prefix) {
+          easing =
+            easing.substr(prefix.length, 1).toLowerCase() +
+            easing.substr(prefix.length + 1);
+          prefix = prefix.substr(4, 1).toLowerCase() + prefix.substr(5);
+          easing = Easing[prefix](Easing[easing || 'ease']);
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        easing = Easing[easing];
+      }
+      if (!easing) {
+        throw new Error('Invalid easing type "' + this.props.easing + '"');
+      }
+    }
 
     if (this._animation) {
       this._animation.stop();
     }
-
     this.setState({ animating: true });
     this._animation = Animated.timing(this.state.height, {
-      toValue: height,
-      duration: duration,
-      easing: easing,
-      useNativeDriver: true,
-    });
-
-    this._animation.start(({ finished }) => {
-      this.setState({ animating: false });
-      if (finished) {
-        this.props.onAnimationEnd();
+      useNativeDriver: false,
+      toValue: height ? height : 0,
+      duration,
+      easing,
+    }).start(() => {
+      if (this.unmounted) {
+        return;
       }
+      this.setState({ animating: false }, () => {
+        if (this.unmounted) {
+          return;
+        }
+        this.props.onAnimationEnd();
+      });
     });
   }
 
-  _getEasingType(easing) {
-    let prefix,
-      found = false;
-    for (let i = 0; i < ANIMATED_EASING_PREFIXES.length; i++) {
-      prefix = ANIMATED_EASING_PREFIXES[i];
-      if (easing.substr(0, prefix.length) === prefix) {
-        easing =
-          easing.substr(prefix.length, 1).toLowerCase() +
-          easing.substr(prefix.length + 1);
-        prefix = prefix.substr(4, 1).toLowerCase() + prefix.substr(5);
-        return Animated[prefix](Animated[easing || 'ease']);
-      }
+  _handleLayoutChange = (event) => {
+    const contentHeight = event.nativeEvent.layout.height;
+    if (
+      this.state.animating ||
+      this.props.collapsed ||
+      this.state.measuring ||
+      this.state.contentHeight === contentHeight
+    ) {
+      return;
     }
 
-    return Animated[easing];
-  }
+    this.state.height.setValue(contentHeight);
+    this.setState({ contentHeight });
+  };
 
   render() {
-    const { height, animating } = this.state;
     const {
-      children,
       collapsed,
       enablePointerEvents,
       renderChildrenCollapsed,
     } = this.props;
-    const pointerEvents =
-      collapsed && !animating && !renderChildrenCollapsed
-        ? 'none'
-        : enablePointerEvents
-        ? 'box-none'
-        : 'auto';
+    const {
+      height,
+      contentHeight,
+      measuring,
+      measured,
+      animating,
+    } = this.state;
+    const hasKnownHeight = !measuring && (measured || collapsed);
+    const style = hasKnownHeight && {
+      overflow: 'hidden',
+      height: height,
+    };
+    const contentStyle = {};
+    if (measuring) {
+      contentStyle.position = 'absolute';
+      contentStyle.opacity = 0;
+    } else if (this.props.align === 'center') {
+      contentStyle.transform = [
+        {
+          translateY: height.interpolate({
+            inputRange: [0, contentHeight],
+            outputRange: [contentHeight / -2, 0],
+          }),
+        },
+      ];
+    } else if (this.props.align === 'bottom') {
+      contentStyle.transform = [
+        {
+          translateY: height.interpolate({
+            inputRange: [0, contentHeight],
+            outputRange: [-contentHeight, 0],
+          }),
+        },
+      ];
+    }
+    if (animating) {
+      contentStyle.height = contentHeight;
+    }
+    const shouldRenderChildren =
+      renderChildrenCollapsed ||
+      ((!collapsed || (collapsed && animating)) &&
+        (animating || measuring || measured));
 
     return (
       <Animated.View
-        style={[styles.container, { height }]}
-        pointerEvents={pointerEvents}
+        style={style}
+        pointerEvents={!enablePointerEvents && collapsed ? 'none' : 'auto'}
       >
-        <View
-          style={styles.contentContainer}
-          onLayout={this._handleOnLayout}
+        <Animated.View
           ref={this._handleRef}
+          style={[this.props.style, contentStyle]}
+          onLayout={this.state.animating ? undefined : this._handleLayoutChange}
         >
-          {children}
-        </View>
+          {shouldRenderChildren && this.props.children}
+        </Animated.View>
       </Animated.View>
     );
   }
 }
-
-const styles = StyleSheet.create({
-  container: {
-    overflow: 'hidden',
-  },
-  contentContainer: {
-    flex: 1,
-  },
-});

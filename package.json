@@ -42,7 +42,8 @@
   },
   "peerDependencies": {
     "react": "*",
-    "react-native": "*"
+    "react-native": "*",
+    "react-native-reanimated": "1.13.4"
   },
   "husky": {
     "hooks": {
@@ -54,5 +55,8 @@
       "eslint --fix",
       "git add"
     ]
+  },
+  "dependencies": {
+    "react-native-reanimated": "^1.13.4"
   }
 }
